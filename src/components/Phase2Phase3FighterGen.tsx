@@ -11,20 +11,38 @@ import {
   Wand2,
   AlertTriangle,
 } from 'lucide-react';
-import { updateFighterData, updateRoomStatus } from '../lib/firebaseHelper';
+import {
+  advanceRoomStatus,
+  claimFighterGeneration,
+  releaseFighterGeneration,
+  renewFighterGeneration,
+  updateFighterData,
+} from '../lib/firebaseHelper';
+import { normalizeFighterAnalysis } from '../lib/fighterData';
+import {
+  canTakeOverGenerationClaim,
+  observeGenerationClaim,
+  ObservedGenerationClaim,
+} from '../lib/generationLease';
 import { compactImageDataUrl } from '../lib/imageData';
 import { RoomData, PlayerId, FighterData } from '../types';
 
+function createWorkerClaimId(playerId: PlayerId): string {
+  const nonce =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${playerId}:${nonce}`;
+}
+
 interface Phase2Phase3FighterGenProps {
   roomCode: string;
-  playerId: PlayerId;
   geminiApiKey: string;
   roomData: RoomData | null;
 }
 
 export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
   roomCode,
-  playerId,
   geminiApiKey,
   roomData,
 }) => {
@@ -39,10 +57,9 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
   const p2Data = roomData?.player2?.fighterData;
 
   const advanceToIntro = async () => {
-    if (playerId !== 'player1') return;
     try {
       setError(null);
-      await updateRoomStatus(roomCode, 'INTRO');
+      await advanceRoomStatus(roomCode, ['ANALYZING', 'SPRITE_GEN'], 'INTRO');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to open the battle intro.';
       setError(message);
@@ -52,20 +69,88 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
   // Process fighter drawings using Gemini Vision + Image Gen APIs
   useEffect(() => {
     let active = true;
-    const requestController = new AbortController();
+    const processingPlayers = new Set<PlayerId>();
+    const failedPlayers = new Set<PlayerId>();
+    const requestControllers = new Set<AbortController>();
+    const observedClaims = new Map<PlayerId, ObservedGenerationClaim>();
 
     async function processPlayerFighter(targetPlayer: PlayerId) {
       const pObj = targetPlayer === 'player1' ? roomData?.player1 : roomData?.player2;
       const setStage = targetPlayer === 'player1' ? setP1Stage : setP2Stage;
       const setLoading = targetPlayer === 'player1' ? setP1Loading : setP2Loading;
 
-      if (!pObj?.drawingUrl || pObj.fighterData) return; // already generated
+      if (
+        !active ||
+        !pObj?.drawingUrl ||
+        pObj.fighterData ||
+        processingPlayers.has(targetPlayer) ||
+        failedPlayers.has(targetPlayer)
+      ) {
+        return;
+      }
 
-      setLoading(true);
-      setStage('Analyzing Drawing...');
-      setError(null);
+      processingPlayers.add(targetPlayer);
+      const workerClaimId = createWorkerClaimId(targetPlayer);
+      let requestController: AbortController | null = null;
+      let requestTimeout: number | null = null;
+      let claimHeartbeat: number | null = null;
+      let requestTimedOut = false;
+      let claimLost = false;
+      let ownsClaim = false;
+      let claimPersisted = false;
 
       try {
+        const previousObservation = observedClaims.get(targetPlayer);
+        const observationTime = performance.now();
+        const replaceClaim = canTakeOverGenerationClaim(
+          previousObservation,
+          observationTime
+        )
+          ? previousObservation
+          : undefined;
+        const claimResult = await claimFighterGeneration(
+          roomCode,
+          targetPlayer,
+          workerClaimId,
+          replaceClaim
+        );
+        if (!claimResult.acquired) {
+          const nextObservation = observeGenerationClaim(
+            previousObservation,
+            claimResult.observedClaim,
+            observationTime
+          );
+          if (nextObservation) observedClaims.set(targetPlayer, nextObservation);
+          else observedClaims.delete(targetPlayer);
+          return;
+        }
+
+        ownsClaim = true;
+        observedClaims.delete(targetPlayer);
+        if (!active) return;
+
+        setLoading(true);
+        setStage('Analyzing Drawing...');
+        setError(null);
+        requestController = new AbortController();
+        requestControllers.add(requestController);
+        requestTimeout = window.setTimeout(() => {
+          requestTimedOut = true;
+          requestController?.abort();
+        }, 90_000);
+        claimHeartbeat = window.setInterval(() => {
+          void renewFighterGeneration(roomCode, targetPlayer, workerClaimId)
+            .then((renewed) => {
+              if (!renewed) {
+                claimLost = true;
+                requestController?.abort();
+              }
+            })
+            .catch(() => {
+              // Persistence verifies ownership again before accepting the result.
+            });
+        }, 15_000);
+
         // Step 1: Multimodal Vision Analysis (Structured Output)
         const analyzeRes = await fetch('/api/gemini/analyze-fighter', {
           method: 'POST',
@@ -78,7 +163,7 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
         });
 
         const analyzeJson = await analyzeRes.json();
-        if (!analyzeJson.success) {
+        if (!analyzeRes.ok || !analyzeJson.success) {
           throw new Error(analyzeJson.error || 'Gemini Vision Analysis failed');
         }
 
@@ -103,54 +188,67 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
         const spriteUrl = await compactImageDataUrl(rawSpriteUrl, {
           maxDimension: 512,
           maxCharacters: 180_000,
+          background: null,
+          removeLightBackground: true,
         });
-        const hp = Number(data.stats?.hp) || 100;
-
-        const completeFighterData: FighterData = {
-          ...data,
-          stats: {
-            ...data.stats,
-            hp,
-            maxHp: hp,
-          },
-          abilities: (data.abilities || []).map((ability: any, index: number) => ({
-            ...ability,
-            id: ability.id || `ability_${index}`,
-          })),
-          spriteUrl,
-        };
+        const completeFighterData = normalizeFighterAnalysis(data, spriteUrl);
 
         if (active) {
-          setStage('Ready!');
-          await updateFighterData(roomCode, targetPlayer, completeFighterData);
+          claimPersisted = await updateFighterData(
+            roomCode,
+            targetPlayer,
+            completeFighterData,
+            workerClaimId
+          );
+          if (claimPersisted) setStage('Ready!');
         }
       } catch (err: any) {
-        if (err?.name === 'AbortError') return;
+        if (err?.name === 'AbortError') {
+          if (active && requestTimedOut) {
+            failedPlayers.add(targetPlayer);
+            setError('The AI Forge timed out. Retry to resume the missing fighter.');
+          }
+          if (claimLost || !active) return;
+          return;
+        }
         console.error(`Error processing ${targetPlayer}:`, err);
-        if (active) setError(err.message || 'Gemini AI processing error');
+        failedPlayers.add(targetPlayer);
+        if (active) {
+          setError(err.message || 'Gemini AI processing error');
+        }
       } finally {
+        if (requestTimeout !== null) window.clearTimeout(requestTimeout);
+        if (claimHeartbeat !== null) window.clearInterval(claimHeartbeat);
+        if (requestController) {
+          requestControllers.delete(requestController);
+        }
+        if (ownsClaim && !claimPersisted) {
+          await releaseFighterGeneration(roomCode, targetPlayer, workerClaimId).catch(
+            () => undefined
+          );
+        }
+        processingPlayers.delete(targetPlayer);
         if (active) setLoading(false);
       }
     }
 
-    // Deferring one task prevents React Strict Mode's development-only effect
-    // replay from launching duplicate, billable generation requests.
-    const startTimer = window.setTimeout(() => {
-      if (playerId === 'player1' && roomData?.player1?.drawingUrl && !p1Data) {
-        void processPlayerFighter('player1');
-      }
-      if (playerId === 'player2' && roomData?.player2?.drawingUrl && !p2Data) {
-        void processPlayerFighter('player2');
-      }
-    }, 0);
+    const processMissingFighters = () => {
+      void processPlayerFighter('player1');
+      void processPlayerFighter('player2');
+    };
+
+    // The transaction chooses one worker per drawing. Retrying the claim lets
+    // either remaining browser recover an abandoned job after its lease expires.
+    const startTimer = window.setTimeout(processMissingFighters, 0);
+    const recoveryTimer = window.setInterval(processMissingFighters, 10_000);
 
     return () => {
       active = false;
       window.clearTimeout(startTimer);
-      requestController.abort();
+      window.clearInterval(recoveryTimer);
+      requestControllers.forEach((controller) => controller.abort());
     };
   }, [
-    playerId,
     roomCode,
     geminiApiKey,
     roomData?.player1?.drawingUrl,
@@ -162,27 +260,29 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
   useEffect(() => {
     if (p1Data && p2Data) {
       const timer = setTimeout(async () => {
-        if (playerId === 'player1') {
-          await advanceToIntro();
-        }
+        await advanceToIntro();
       }, 3000);
       return () => clearTimeout(timer);
     }
   }, [p1Data, p2Data]);
 
   return (
-    <div id="phase2-3-fighter-gen" className="min-h-[85vh] flex flex-col items-center justify-center p-4">
+    <div id="phase2-3-fighter-gen" className="flex min-h-[82vh] flex-col items-center justify-center px-1 py-6 sm:px-4">
       {/* Header Banner */}
-      <div className="text-center max-w-xl mx-auto mb-6 space-y-1">
-        <span className="text-xs font-bold text-amber-400 uppercase tracking-widest flex items-center justify-center space-x-1">
+      <div className="mx-auto mb-6 max-w-2xl space-y-2 text-center">
+        <span className="phase-kicker mx-auto gap-1.5">
           <Wand2 className="w-4 h-4 animate-spin" />
-          <span>Phases 2 & 3: Gemini Multimodal Transformation</span>
+          <span>2 / 3 · AI FORGE</span>
         </span>
-        <h2 className="text-2xl md:text-3xl font-black text-white uppercase italic">
-          Synthesizing <span className="bg-gradient-to-r from-amber-400 to-rose-500 bg-clip-text text-transparent">Fighters</span>
-        </h2>
-        <p className="text-xs text-slate-400">
-          Gemini 2.5 Flash is extracting character elements, stats, abilities & generating polished 2D arcade sprites!
+        <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">
+          Your sketches are becoming{' '}
+          <span className="bg-gradient-to-r from-violet-300 to-amber-300 bg-clip-text text-transparent">
+            contenders.
+          </span>
+        </h1>
+        <p className="text-sm leading-6 text-slate-400">
+          The Forge reads shape and color, builds a combat profile, invents signature moves, and
+          cuts each fighter cleanly away from its drawing background.
         </p>
       </div>
 
@@ -192,16 +292,16 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
             <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
             <span>{error}</span>
           </div>
-          {!(p1Data && p2Data) &&
-            ((playerId === 'player1' && !p1Data) || (playerId === 'player2' && !p2Data)) && (
-              <button
-                type="button"
-                onClick={() => setRetryVersion((version) => version + 1)}
-                className="rounded-lg bg-rose-400 px-3 py-1.5 font-black uppercase text-slate-950 hover:bg-rose-300"
-              >
-                Retry Fighter Generation
-              </button>
-            )}
+          {!(p1Data && p2Data) && (
+            <button
+              type="button"
+              onClick={() => setRetryVersion((version) => version + 1)}
+              disabled={p1Loading || p2Loading}
+              className="rounded-lg bg-rose-400 px-3 py-1.5 font-black uppercase text-slate-950 hover:bg-rose-300 disabled:cursor-wait disabled:opacity-50"
+            >
+              Retry Fighter Generation
+            </button>
+          )}
         </div>
       )}
 
@@ -209,7 +309,7 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
       <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Player 1 Fighter Card */}
         <FighterDisplayCard
-          playerLabel="Player 1"
+          playerLabel="Creator 1"
           fighter={p1Data}
           loading={p1Loading}
           stage={p1Stage}
@@ -218,7 +318,7 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
 
         {/* Player 2 Fighter Card */}
         <FighterDisplayCard
-          playerLabel="Player 2"
+          playerLabel="Creator 2"
           fighter={p2Data}
           loading={p2Loading}
           stage={p2Stage}
@@ -230,9 +330,9 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
         <div className="mt-8 text-center space-y-3">
           <div className="inline-flex items-center space-x-2 px-4 py-2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-full font-bold text-sm shadow-lg">
             <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-            <span>Both Fighters Generated! Entering Battle Arena...</span>
+            <span>Forge complete. The autonomous showdown is loading…</span>
           </div>
-          {error && playerId === 'player1' && (
+          {error && (
             <button
               type="button"
               onClick={() => void advanceToIntro()}
@@ -264,7 +364,7 @@ const FighterDisplayCard: React.FC<FighterDisplayCardProps> = ({
   fallbackDrawing,
 }) => {
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl relative overflow-hidden flex flex-col justify-between space-y-4">
+    <div className="glass-panel relative flex flex-col justify-between space-y-4 overflow-hidden rounded-3xl border border-white/10 p-5 shadow-2xl shadow-black/30">
       {/* Card Header */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-3">
         <span className="font-extrabold text-sm uppercase tracking-wider text-cyan-400">{playerLabel}</span>
@@ -296,12 +396,12 @@ const FighterDisplayCard: React.FC<FighterDisplayCardProps> = ({
 
         {/* Gemini Rendered Sprite */}
         <div className="text-center space-y-1">
-          <span className="text-[10px] text-amber-400 font-bold uppercase flex items-center justify-center space-x-0.5">
-            <Sparkles className="w-3 h-3" /> 2D Sprite
+          <span className="flex items-center justify-center gap-1 text-[10px] font-bold uppercase text-amber-300">
+            <Sparkles className="w-3 h-3" /> Battle cutout
           </span>
-          <div className="w-24 h-24 mx-auto bg-slate-900 rounded-lg p-1 border border-amber-500/30 shadow overflow-hidden flex items-center justify-center relative">
+          <div className="sprite-checker relative mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-lg border border-amber-300/30 p-1 shadow">
             {fighter?.spriteUrl ? (
-              <img src={fighter.spriteUrl} alt="Gemini Sprite" className="max-w-full max-h-full object-contain" />
+              <img src={fighter.spriteUrl} alt={`${fighter.characterName} transparent fighter sprite`} className="block max-h-full max-w-full bg-transparent object-contain" />
             ) : (
               <Loader2 className="w-6 h-6 text-amber-400 animate-spin" />
             )}
@@ -316,6 +416,11 @@ const FighterDisplayCard: React.FC<FighterDisplayCardProps> = ({
             <h3 className="text-xl font-black text-white italic uppercase">{fighter.characterName}</h3>
             <p className="text-xs text-slate-400 italic">"{fighter.personality}"</p>
           </div>
+
+          <p className="rounded-xl border border-violet-300/15 bg-violet-300/[0.06] px-3 py-2 text-xs leading-5 text-violet-100">
+            The Forge interpreted this as a <strong>{fighter.element}</strong> build with a{' '}
+            {fighter.personality.toLowerCase()} style. These values will drive its AI decisions.
+          </p>
 
           {/* Stats Progress Bars */}
           <div className="grid grid-cols-2 gap-2 text-xs bg-slate-950 p-3 rounded-xl border border-slate-800">
@@ -364,14 +469,14 @@ const FighterDisplayCard: React.FC<FighterDisplayCardProps> = ({
           <div className="space-y-1.5">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1">
               <Swords className="w-3.5 h-3.5 text-amber-400" />
-              <span>Gemini Assigned Abilities</span>
+              <span>AI combat loadout</span>
             </span>
             <div className="grid grid-cols-3 gap-1.5">
               {fighter.abilities.slice(0, 3).map((ability, idx) => (
-                <div key={idx} className="bg-slate-950 p-2 rounded-lg border border-slate-800 text-[10px] space-y-0.5">
+                <div key={idx} className="space-y-1 rounded-lg border border-white/[0.07] bg-slate-950 p-2 text-[11px]">
                   <div className="font-bold text-amber-300 truncate">{ability.name}</div>
-                  <div className="text-slate-400 text-[9px] line-clamp-1">{ability.description}</div>
-                  <div className="text-rose-400 font-semibold">Dmg: {ability.damage} | {ability.cooldown}s</div>
+                  <div className="line-clamp-2 text-[10px] leading-4 text-slate-400">{ability.description}</div>
+                  <div className="font-semibold text-rose-300">Power {ability.damage} · {ability.cooldown}s charge</div>
                 </div>
               ))}
             </div>

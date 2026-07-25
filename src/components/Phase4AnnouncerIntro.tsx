@@ -44,7 +44,7 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
 
       try {
         // Step 1: Announce Player 1
-        const line1 = `Introducing ${p1.characterName}, master of ${p1.element}!`;
+        const line1 = `AI pilot one online. Introducing ${p1.characterName}, master of ${p1.element}!`;
         setAnnouncementText(line1);
         void speakText(line1, speechController.signal);
 
@@ -52,7 +52,7 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
         await new Promise((r) => setTimeout(r, 1200));
 
         // Step 2: Announce Player 2
-        const line2 = `Facing off against ${p2.characterName}, master of ${p2.element}!`;
+        const line2 = `AI pilot two online. Facing ${p2.characterName}, master of ${p2.element}!`;
         setAnnouncementText(line2);
         void speakText(line2, speechController.signal);
 
@@ -128,30 +128,37 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
   };
 
   return (
-    <div id="phase4-announcer-intro" className="min-h-[85vh] flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-4xl bg-slate-900/90 border border-amber-500/40 rounded-3xl p-8 shadow-2xl backdrop-blur relative overflow-hidden text-center space-y-8">
+    <div id="phase4-announcer-intro" className="flex min-h-[82vh] flex-col items-center justify-center px-1 py-6 sm:px-4">
+      <div className="glass-panel relative w-full max-w-4xl space-y-7 overflow-hidden rounded-3xl border border-rose-300/30 p-4 text-center shadow-2xl shadow-black/30 sm:p-8">
         {/* Background Glowing Flare */}
         <div className="absolute -top-20 -left-20 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
 
         {/* Announcer Banner */}
         <div className="space-y-2">
-          <div className="inline-flex items-center space-x-2 px-4 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-xs uppercase tracking-widest">
-            <Volume2 className={`w-4 h-4 ${isSpeaking ? 'text-amber-400 animate-ping' : ''}`} />
-            <span>Gemini Announcer Voice</span>
+          <div className="phase-kicker phase-kicker-battle mx-auto gap-2">
+            <Swords className="h-4 w-4" />
+            <span>3 / 3 · AI BATTLE</span>
           </div>
-          <h2 className="text-2xl md:text-4xl font-black text-amber-300 uppercase tracking-tight italic drop-shadow-lg">
+          <div className="mx-auto flex w-fit items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-300">
+            <Volume2 className={`w-4 h-4 ${isSpeaking ? 'text-amber-400 animate-ping' : ''}`} />
+            <span>AI pilots online · Announcer feed</span>
+          </div>
+          <h1 className="text-2xl font-black tracking-tight text-white drop-shadow-lg md:text-4xl">
             "{announcementText}"
-          </h2>
+          </h1>
+          <p className="text-xs text-slate-500">
+            No player controls from here—the forged combat profiles take over.
+          </p>
         </div>
 
         {/* Versus Face-off Cards */}
         <div className="grid grid-cols-2 gap-4 items-center max-w-2xl mx-auto relative">
           {/* Fighter 1 */}
           <div className="bg-slate-950 border border-cyan-500/40 rounded-2xl p-4 text-center space-y-2 transform -rotate-1 shadow-xl">
-            <div className="w-28 h-28 mx-auto bg-slate-900 rounded-xl p-2 border border-cyan-500/30 overflow-hidden flex items-center justify-center">
+            <div className="sprite-checker mx-auto flex h-28 w-28 items-center justify-center overflow-hidden rounded-xl border border-cyan-500/30 p-2">
               {p1?.spriteUrl ? (
-                <img src={p1.spriteUrl} alt={p1.characterName} className="max-w-full max-h-full object-contain" />
+                <img src={p1.spriteUrl} alt={p1.characterName} className="block max-h-full max-w-full bg-transparent object-contain" />
               ) : (
                 <Swords className="w-12 h-12 text-cyan-400" />
               )}
@@ -170,9 +177,9 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
 
           {/* Fighter 2 */}
           <div className="bg-slate-950 border border-rose-500/40 rounded-2xl p-4 text-center space-y-2 transform rotate-1 shadow-xl">
-            <div className="w-28 h-28 mx-auto bg-slate-900 rounded-xl p-2 border border-rose-500/30 overflow-hidden flex items-center justify-center">
+            <div className="sprite-checker mx-auto flex h-28 w-28 items-center justify-center overflow-hidden rounded-xl border border-rose-500/30 p-2">
               {p2?.spriteUrl ? (
-                <img src={p2.spriteUrl} alt={p2.characterName} className="max-w-full max-h-full object-contain" />
+                <img src={p2.spriteUrl} alt={p2.characterName} className="block max-h-full max-w-full bg-transparent object-contain" />
               ) : (
                 <Swords className="w-12 h-12 text-rose-400" />
               )}

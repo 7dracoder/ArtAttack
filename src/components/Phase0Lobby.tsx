@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import {
-  Swords,
   PlusCircle,
   LogIn,
   Copy,
@@ -11,9 +10,9 @@ import {
   ShieldAlert,
   Loader2,
   Sparkles,
-  ArrowRight,
+  Bot,
 } from 'lucide-react';
-import { createRoom, joinRoom, updateRoomStatus } from '../lib/firebaseHelper';
+import { createRoom, joinRoom } from '../lib/firebaseHelper';
 import { RoomData, PlayerId } from '../types';
 
 interface Phase0LobbyProps {
@@ -62,7 +61,7 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
 
   const handleCreateRoom = async () => {
     if (!isFirebaseConnected) {
-      setError('Please paste and apply your Firebase Config in the top bar first!');
+      setError('The battle cloud is unavailable. Check the server configuration and retry.');
       return;
     }
     setLoading(true);
@@ -85,7 +84,7 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
       return;
     }
     if (!isFirebaseConnected) {
-      setError('Please paste and apply your Firebase Config in the top bar first!');
+      setError('The battle cloud is unavailable. Check the server configuration and retry.');
       return;
     }
 
@@ -111,29 +110,29 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
     }
   };
 
-  const handleStartGame = async () => {
-    if (!roomCode) return;
-    try {
-      await updateRoomStatus(roomCode, 'DRAWING');
-    } catch (e: any) {
-      setError(e.message);
-    }
-  };
-
   return (
-    <div id="phase0-lobby" className="min-h-[85vh] flex flex-col items-center justify-center p-4">
+    <div id="phase0-lobby" className="flex min-h-[82vh] flex-col items-center justify-center px-1 py-8 sm:px-4">
       {/* Header Banner */}
-      <div className="text-center max-w-2xl mx-auto mb-8 space-y-2">
-        <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-semibold uppercase tracking-wider">
+      <div className="mx-auto mb-8 max-w-3xl space-y-3 text-center">
+        <div className="inline-flex items-center gap-2 rounded-full border border-violet-300/25 bg-violet-300/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-violet-200">
           <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>Real-time Multiplayer Arcade</span>
+          <span>Two creators · One AI showdown</span>
         </div>
-        <h1 className="text-4xl md:text-6xl font-black tracking-tight text-white uppercase italic drop-shadow-md">
-          Art <span className="bg-gradient-to-r from-amber-400 via-rose-500 to-cyan-400 bg-clip-text text-transparent">Attack</span>
+        <h1 className="text-4xl font-black tracking-[-0.04em] text-white sm:text-6xl md:text-7xl">
+          Draw it. Forge it.{' '}
+          <span className="bg-gradient-to-r from-amber-300 via-rose-400 to-cyan-300 bg-clip-text text-transparent">
+            Watch it fight.
+          </span>
         </h1>
-        <p className="text-slate-400 text-sm md:text-base">
-          Draw your fighter freehand, let Gemini AI extract stats & generate polished 2D sprites, then battle live over Firebase!
+        <p className="mx-auto max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">
+          Each player sketches a contender. AI creates its stats, powers, personality, and
+          transparent arcade fighter—then pilots both drawings through a live battle simulation.
         </p>
+        <div className="flex flex-wrap justify-center gap-2 pt-1 text-[11px] font-bold text-slate-500">
+          <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">1 · Sketch</span>
+          <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">2 · AI Forge</span>
+          <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">3 · Autonomous battle</span>
+        </div>
       </div>
 
       {error && (
@@ -145,26 +144,26 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
 
       {/* Main Room Lobby Card */}
       {!roomCode ? (
-        <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-6 backdrop-blur">
-          <div className="grid grid-cols-2 gap-3">
+        <div className="glass-panel w-full max-w-lg space-y-5 rounded-3xl border border-white/10 p-4 shadow-2xl shadow-black/30 sm:p-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {/* Create Room Button */}
             <button
               id="create-room-btn"
               onClick={handleCreateRoom}
               disabled={loading || !isFirebaseConnected}
-              className="flex flex-col items-center justify-center p-5 bg-gradient-to-br from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 border border-cyan-400/40 text-white rounded-xl font-bold shadow-lg transition-all transform active:scale-95 disabled:opacity-50"
+              className="focus-ring flex min-h-36 flex-col items-center justify-center rounded-2xl border border-cyan-300/30 bg-gradient-to-br from-cyan-400 to-blue-600 p-5 font-bold text-slate-950 shadow-lg shadow-cyan-500/15 transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50"
             >
-              <PlusCircle className="w-8 h-8 mb-2 text-cyan-200" />
-              <span className="text-sm">Create Room</span>
-              <span className="text-[10px] text-cyan-200/80 font-normal mt-0.5">Host as Player 1</span>
+              <PlusCircle className="mb-2 h-8 w-8" />
+              <span className="text-sm font-black">Create a battle</span>
+              <span className="mt-1 text-[11px] font-semibold text-slate-900/70">Invite one other artist</span>
             </button>
 
             {/* Join Room Form */}
-            <div className="flex flex-col justify-between p-4 bg-slate-950 border border-slate-800 rounded-xl">
+            <div className="flex min-h-36 flex-col justify-between rounded-2xl border border-white/10 bg-black/20 p-4">
               <div className="space-y-1">
                 <span className="text-xs font-semibold text-slate-300 flex items-center space-x-1">
                   <LogIn className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Join Room</span>
+                  <span>Join with code</span>
                 </span>
                 <input
                   id="join-code-input"
@@ -173,16 +172,17 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
                   placeholder="ENTER CODE"
                   value={joinInput}
                   onChange={(e) => setJoinInput(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-900 border border-slate-700 text-amber-300 uppercase tracking-widest text-center font-bold text-sm py-1.5 rounded focus:outline-none focus:border-amber-400"
+                  aria-label="Battle room code"
+                  className="focus-ring mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-center text-sm font-black uppercase tracking-[0.2em] text-amber-300 placeholder:text-slate-700"
                 />
               </div>
               <button
                 id="join-room-submit-btn"
                 onClick={() => handleJoinByCode()}
                 disabled={loading || !isFirebaseConnected || !joinInput.trim()}
-                className="w-full mt-2 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-xs transition-all disabled:opacity-50"
+                className="focus-ring mt-2 w-full rounded-lg bg-amber-300 py-2 text-xs font-black text-slate-950 transition-all hover:bg-amber-200 disabled:opacity-50"
               >
-                Join
+                Enter battle
               </button>
             </div>
           </div>
@@ -196,9 +196,9 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
         </div>
       ) : (
         /* Room Display & Lobby Waiting Screen */
-        <div className="w-full max-w-lg bg-slate-900 border border-cyan-500/30 rounded-2xl p-6 shadow-2xl space-y-6 text-slate-100">
+        <div className="glass-panel w-full max-w-lg space-y-6 rounded-3xl border border-cyan-300/25 p-5 text-slate-100 shadow-2xl shadow-black/30 sm:p-6">
           <div className="text-center space-y-1 border-b border-slate-800 pb-4">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Lobby Room Code</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Invite code</span>
             <div className="flex items-center justify-center space-x-3">
               <span className="text-4xl md:text-5xl font-black text-amber-400 tracking-widest font-mono">
                 {roomCode}
@@ -222,7 +222,7 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
                 </button>
               )}
             </div>
-            <p className="text-[11px] text-slate-400">Share this code or QR link with your opponent to battle!</p>
+            <p className="text-xs text-slate-400">Share the code or QR link with a second creator.</p>
           </div>
 
           {/* Player Connection Status Cards */}
@@ -231,7 +231,7 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-center relative overflow-hidden">
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 absolute top-3 right-3 animate-ping" />
               <Users className="w-8 h-8 mx-auto mb-1 text-cyan-400" />
-              <div className="font-bold text-sm text-cyan-300">Player 1 (Host)</div>
+              <div className="font-bold text-sm text-cyan-300">Creator 1 (Host)</div>
               <div className="text-[11px] text-emerald-400 font-medium mt-1">Ready</div>
               {playerId === 'player1' && (
                 <span className="inline-block mt-2 px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-semibold">
@@ -252,7 +252,7 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
                 <>
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 absolute top-3 right-3 animate-ping" />
                   <Users className="w-8 h-8 mx-auto mb-1 text-rose-400" />
-                  <div className="font-bold text-sm text-rose-300">Player 2</div>
+                  <div className="font-bold text-sm text-rose-300">Creator 2</div>
                   <div className="text-[11px] text-emerald-400 font-medium mt-1">Connected!</div>
                   {playerId === 'player2' && (
                     <span className="inline-block mt-2 px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px] font-semibold">
@@ -263,8 +263,8 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
               ) : (
                 <div className="py-2 space-y-1">
                   <Loader2 className="w-6 h-6 mx-auto text-amber-400 animate-spin" />
-                  <div className="text-xs font-semibold text-amber-400">Waiting for Player 2...</div>
-                  <div className="text-[10px] text-slate-500">Only 2 players allowed per room</div>
+                  <div className="text-xs font-semibold text-amber-400">Waiting for a second creator…</div>
+                  <div className="text-[10px] text-slate-500">Sketchpads open as soon as they join</div>
                 </div>
               )}
             </div>
@@ -273,24 +273,13 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
           {/* Action Footer */}
           <div className="pt-2 text-center">
             {roomData?.player2 ? (
-              playerId === 'player1' ? (
-                <button
-                  id="host-start-drawing-btn"
-                  onClick={handleStartGame}
-                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-slate-950 font-black text-base uppercase rounded-xl shadow-lg transition-all flex items-center justify-center space-x-2"
-                >
-                  <Swords className="w-5 h-5" />
-                  <span>Both Ready! Start Drawing Phase</span>
-                  <ArrowRight className="w-5 h-5" />
-                </button>
-              ) : (
-                <div className="p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-xl text-cyan-300 text-xs font-semibold animate-pulse">
-                  Connected! Host is launching the drawing room...
-                </div>
-              )
+              <div className="flex items-center justify-center gap-2 rounded-xl border border-emerald-300/25 bg-emerald-300/10 p-3 text-xs font-bold text-emerald-300">
+                <Bot className="h-4 w-4" />
+                Both creators connected. Opening the sketchpads…
+              </div>
             ) : (
-              <div className="text-xs text-slate-400 italic">
-                Send the code to a friend. Once joined, Player 1 can start the game!
+              <div className="text-xs italic text-slate-400">
+                Invite a second artist. Sketchpads open automatically when they join.
               </div>
             )}
           </div>

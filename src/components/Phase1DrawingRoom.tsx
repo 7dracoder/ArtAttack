@@ -46,6 +46,7 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
   const [isEraser, setIsEraser] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [locking, setLocking] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const me = playerId === 'player1' ? roomData?.player1 : roomData?.player2;
   const opponent = playerId === 'player1' ? roomData?.player2 : roomData?.player1;
@@ -138,6 +139,7 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
     setLocking(true);
+    setSubmitError(null);
 
     try {
       const drawingDataUrl = exportCompactImage(canvas, {
@@ -148,30 +150,36 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
       setIsLocked(true);
     } catch (err) {
       console.error('Failed to lock in drawing:', err);
+      setSubmitError(err instanceof Error ? err.message : 'The sketch could not be sent to the AI Forge.');
     } finally {
       setLocking(false);
     }
   };
 
   return (
-    <div id="phase1-drawing-room" className="min-h-[85vh] flex flex-col items-center justify-center p-4">
+    <div id="phase1-drawing-room" className="flex min-h-[82vh] flex-col items-center justify-center px-1 py-6 sm:px-4">
       {/* Header Info */}
-      <div className="text-center max-w-xl mx-auto mb-4 space-y-1">
-        <span className="text-xs font-bold text-amber-400 uppercase tracking-widest flex items-center justify-center space-x-1">
+      <div className="mx-auto mb-5 max-w-2xl space-y-2 text-center">
+        <span className="phase-kicker mx-auto gap-1.5">
           <Sparkles className="w-4 h-4" />
-          <span>Phase 1: Fighter Canvas</span>
+          <span>1 / 3 · DRAW</span>
         </span>
-        <h2 className="text-2xl md:text-3xl font-black text-white uppercase italic">
-          Draw Your <span className="text-cyan-400">Battle Character</span>
-        </h2>
-        <p className="text-xs text-slate-400">
-          Draw your fighter's body, weapons, or creature shape. Gemini AI will analyze the colors and generate a polished 2D sprite!
+        <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">
+          Sketch a fighter. <span className="text-cyan-300">Messy is welcome.</span>
+        </h1>
+        <p className="text-sm leading-6 text-slate-400">
+          Give it a silhouette, bold colors, and one signature detail. The AI Forge reads those
+          choices to build the stats and powers that decide the simulation.
         </p>
+        <div className="mx-auto flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11px] font-bold text-slate-500">
+          <Palette className="h-3.5 w-3.5 text-violet-300" />
+          Color hints at element · shape hints at fighting style
+        </div>
       </div>
 
       <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* Left Column: Canvas + Controls */}
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-2xl space-y-4">
+        <div className="glass-panel space-y-4 rounded-3xl border border-white/10 p-3 shadow-2xl shadow-black/30 sm:p-4 lg:col-span-2">
           {/* Canvas Board */}
           <div className="relative aspect-square max-w-[450px] mx-auto bg-white rounded-xl overflow-hidden border-4 border-slate-800 shadow-inner">
             <canvas
@@ -190,7 +198,7 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
             {isLocked && (
               <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-xs flex flex-col items-center justify-center text-emerald-400 space-y-2">
                 <Lock className="w-12 h-12" />
-                <span className="font-bold text-sm tracking-wider uppercase">Fighter Canvas Locked In!</span>
+                <span className="text-sm font-bold tracking-wider uppercase">Sketch sent to the AI Forge</span>
               </div>
             )}
           </div>
@@ -204,6 +212,9 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
                 {COLOR_PRESETS.map((color) => (
                   <button
                     key={color}
+                    type="button"
+                    aria-label={`Use ${color} brush color`}
+                    aria-pressed={!isEraser && brushColor === color}
                     onClick={() => {
                       setBrushColor(color);
                       setIsEraser(false);
@@ -304,7 +315,7 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
                   className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-lg shadow transition-all flex items-center justify-center space-x-1.5"
                 >
                   {locking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                  <span>Lock In Fighter</span>
+                  <span>Send to AI Forge</span>
                 </button>
               ) : (
                 <div className="text-[11px] text-slate-400 italic text-center py-1">
@@ -316,7 +327,7 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
             {/* Opponent Status */}
             <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
               <div className="flex items-center justify-between text-xs font-semibold">
-                <span className="text-rose-300">Opponent Fighter</span>
+                <span className="text-rose-300">Rival sketch</span>
                 {opponent?.drawingLocked ? (
                   <span className="text-emerald-400 flex items-center space-x-1">
                     <CheckCircle2 className="w-3.5 h-3.5" /> Locked In!
@@ -329,11 +340,20 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
               </div>
               <p className="text-[10px] text-slate-500">
                 {opponent?.drawingLocked
-                  ? 'Opponent has locked in their character drawing!'
-                  : 'Waiting for opponent to finish drawing on their device.'}
+                  ? 'The rival sketch is ready for its combat profile.'
+                  : 'Waiting for the other creator to send their sketch.'}
               </p>
             </div>
           </div>
+
+          {submitError && (
+            <div
+              role="alert"
+              className="rounded-xl border border-rose-400/25 bg-rose-400/10 p-3 text-xs leading-5 text-rose-200"
+            >
+              {submitError}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -14,7 +14,7 @@ async function startServer() {
   const getAI = (reqKey?: string) => {
     const apiKey = reqKey || process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error('Gemini API Key is missing. Please enter your key in the header configuration bar.');
+      throw new Error('Gemini API key is not configured on the server.');
     }
     return new GoogleGenAI({
       apiKey,
@@ -107,6 +107,15 @@ async function startServer() {
 
       const jsonText = response.text || '{}';
       const result = JSON.parse(jsonText);
+      if (
+        !result ||
+        typeof result.characterName !== 'string' ||
+        !result.stats ||
+        !Array.isArray(result.abilities) ||
+        result.abilities.length === 0
+      ) {
+        throw new Error('Gemini returned an incomplete fighter profile. Please retry.');
+      }
       res.json({ success: true, data: result });
     } catch (err: any) {
       console.error('Error analyzing fighter:', err);
@@ -125,7 +134,7 @@ async function startServer() {
       const ai = getAI(customApiKey);
       const imageData = parseImageDataUrl(drawing);
 
-      const promptText = `Redraw this hand-drawn sketch into a polished, high-resolution 2D fighting game character sprite for "${characterName || 'Fighter'}" (${element || 'Elemental'}). Dynamic fighting stance, vibrant arcade game artwork, bold clean outlines, full body visible, isolated on a clean solid pure white background. Preserve the original color scheme, silhouette, and core visual features.`;
+      const promptText = `Redraw this hand-drawn sketch into a polished, high-resolution 2D fighting game character sprite for "${characterName || 'Fighter'}" (${element || 'Elemental'}). Use a dynamic fighting stance, vibrant arcade artwork, and bold closed outlines. Keep the full body centered with generous empty margin on a perfectly uniform pure-white (#FFFFFF) removable studio matte. No scenery, floor line, cast shadow, frame, glow, texture, lettering, or extra objects. Preserve the original color scheme, silhouette, and core visual features.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3.1-flash-image',

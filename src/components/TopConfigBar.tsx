@@ -1,47 +1,97 @@
 import React from 'react';
-import { Database, Sparkles, CheckCircle2, Zap } from 'lucide-react';
+import { Bot, CheckCircle2, Cloud, Paintbrush, Sparkles, Wand2 } from 'lucide-react';
+import { GamePhase, PlayerId } from '../types';
 
-export const TopConfigBar: React.FC = () => {
+interface TopConfigBarProps {
+  phase: GamePhase;
+  isCloudReady: boolean;
+  roomCode: string | null;
+  playerId: PlayerId | null;
+}
+
+const STEPS = [
+  { label: 'Draw', icon: Paintbrush, phases: ['DRAWING'] },
+  { label: 'AI Forge', icon: Wand2, phases: ['ANALYZING', 'SPRITE_GEN', 'INTRO'] },
+  { label: 'Battle', icon: Bot, phases: ['FIGHT', 'VICTORY'] },
+];
+
+export const TopConfigBar: React.FC<TopConfigBarProps> = ({
+  phase,
+  isCloudReady,
+  roomCode,
+  playerId,
+}) => {
   return (
-    <div id="top-config-bar" className="bg-slate-950 border-b border-cyan-500/30 text-slate-100 shadow-lg sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 py-2.5 flex items-center justify-between text-xs md:text-sm">
-        {/* Left: Branding */}
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-1.5 font-black tracking-wider text-cyan-400 text-base">
-            <Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />
-            <span className="bg-gradient-to-r from-amber-400 via-rose-500 to-cyan-400 bg-clip-text text-transparent">
-              ART ATTACK
-            </span>
+    <header
+      id="top-config-bar"
+      className="sticky top-0 z-50 border-b border-white/10 bg-[#070914]/85 text-slate-100 shadow-lg shadow-black/20 backdrop-blur-xl"
+    >
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-3 py-2.5 sm:px-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-300/20 bg-gradient-to-br from-amber-300/20 via-rose-400/15 to-cyan-300/20">
+            <Sparkles className="h-5 w-5 text-amber-300" />
           </div>
-
-          <div className="hidden sm:flex items-center space-x-2 border-l border-slate-800 pl-3">
-            <span className="text-[11px] text-slate-400 font-semibold">
-              Real-time Multiplayer 2D Fighter Engine
-            </span>
+          <div className="min-w-0">
+            <div className="bg-gradient-to-r from-amber-300 via-rose-400 to-cyan-300 bg-clip-text text-sm font-black tracking-[0.15em] text-transparent sm:text-base">
+              ART ATTACK
+            </div>
+            <div className="hidden truncate text-[10px] font-semibold text-slate-500 sm:block">
+              Sketch it. Forge it. Watch it fight.
+            </div>
           </div>
         </div>
 
-        {/* Right: Live Connection Badges */}
-        <div className="flex items-center space-x-2">
-          {/* Automatic Firebase Status */}
-          <span className="flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
-            <Database className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden md:inline">Firebase Cloud:</span>
-            <span className="text-emerald-400 flex items-center space-x-1">
-              <CheckCircle2 className="w-3 h-3" /> Live
-            </span>
-          </span>
+        <nav aria-label="Game progress" className="hidden items-center gap-1 md:flex">
+          {STEPS.map((step, index) => {
+            const active = step.phases.includes(phase);
+            const Icon = step.icon;
+            return (
+              <React.Fragment key={step.label}>
+                {index > 0 && <div className="h-px w-5 bg-white/10" />}
+                <div
+                  aria-current={active ? 'step' : undefined}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] transition-colors ${
+                    active
+                      ? 'border border-violet-300/30 bg-violet-300/10 text-violet-200'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  <span className="font-mono text-[9px]">{index + 1}</span>
+                  <Icon className="h-3.5 w-3.5" />
+                  {step.label}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </nav>
 
-          {/* Automatic Gemini AI Status */}
-          <span className="flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden md:inline">Gemini AI Engine:</span>
-            <span className="text-emerald-400 flex items-center space-x-1">
-              <CheckCircle2 className="w-3 h-3" /> Connected
-            </span>
+        <div className="flex shrink-0 items-center gap-2">
+          {roomCode && (
+            <div className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-right sm:block">
+              <div className="text-[8px] font-black uppercase tracking-[0.16em] text-slate-600">
+                Room · {playerId === 'player1' ? 'Creator 1' : 'Creator 2'}
+              </div>
+              <div className="font-mono text-xs font-black tracking-[0.16em] text-white">
+                {roomCode}
+              </div>
+            </div>
+          )}
+          <span
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide ${
+              isCloudReady
+                ? 'border-emerald-300/25 bg-emerald-300/10 text-emerald-300'
+                : 'border-rose-300/25 bg-rose-300/10 text-rose-300'
+            }`}
+          >
+            {isCloudReady ? (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            ) : (
+              <Cloud className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden sm:inline">{isCloudReady ? 'Cloud configured' : 'Offline'}</span>
           </span>
         </div>
       </div>
-    </div>
+    </header>
   );
 };

@@ -40,6 +40,14 @@ export interface FighterData {
   victoryDialogue: string;
   environmentName: string;
   spriteUrl: string;
+  spriteBackgroundRemoved?: boolean;
+}
+
+export interface FighterGenerationClaim {
+  ownerId: string;
+  claimId: string;
+  heartbeat: number;
+  claimedAt: number;
 }
 
 export interface PlayerFightState {
@@ -58,6 +66,28 @@ export interface PlayerFightState {
   updatedAt: number;
 }
 
+export interface BattleAction {
+  turn: number;
+  actor: PlayerId;
+  target: PlayerId;
+  abilityId: string;
+  abilityName: string;
+  abilityType: Ability['type'] | 'basic';
+  element: string;
+  damage: number;
+  healing: number;
+  critical: boolean;
+  blocked: boolean;
+  dodged: boolean;
+  elementMultiplier: number;
+  attackScore: number;
+  defenseScore: number;
+  actorHpAfter: number;
+  targetHpAfter: number;
+  summary: string;
+  resolvedAt: number;
+}
+
 export interface RoomData {
   roomCode: string;
   createdAt: number;
@@ -70,6 +100,7 @@ export interface RoomData {
     drawingLocked: boolean;
     drawingUrl?: string;
     fighterData?: FighterData;
+    generationClaim?: FighterGenerationClaim | null;
   } | null;
   player2: {
     id: string;
@@ -78,6 +109,7 @@ export interface RoomData {
     drawingLocked: boolean;
     drawingUrl?: string;
     fighterData?: FighterData;
+    generationClaim?: FighterGenerationClaim | null;
   } | null;
   fightState?: {
     player1: PlayerFightState;
@@ -87,8 +119,14 @@ export interface RoomData {
     bgMusicStyle?: string;
     announcerCommentary?: string;
     startedAt?: number;
+    turn: number;
+    nextActor: PlayerId;
+    simulationStatus: 'FIGHTING' | 'COMPLETE';
+    lastAction?: BattleAction;
+    battleLog: BattleAction[];
   };
   restarts?: number;
+  lastCompletedStartedAt?: number | null;
 }
 
 export interface UserConfig {

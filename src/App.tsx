@@ -8,7 +8,8 @@ import { Phase5FightArena } from './components/Phase5FightArena';
 import { RoomData, PlayerId, GamePhase } from './types';
 import {
   isFirebaseReady,
-  updateRoomStatus,
+  advanceRoomStatus,
+  getSessionUserId,
   initFightState,
   subscribeToRoom,
 } from './lib/firebaseHelper';
@@ -32,7 +33,13 @@ export default function App() {
     return subscribeToRoom(
       roomCode,
       (data) => {
+        const sessionUserId = getSessionUserId();
         setRoomData(data);
+        if (data.player1?.id === sessionUserId) {
+          setPlayerId('player1');
+        } else if (data.player2?.id === sessionUserId) {
+          setPlayerId('player2');
+        }
         setRoomSyncError(null);
       },
       (error) => setRoomSyncError(error.message)
@@ -54,12 +61,16 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-slate-950">
-      {/* Top Header Bar */}
-      <TopConfigBar />
+    <div className="app-shell min-h-screen text-slate-100 flex flex-col font-sans selection:bg-cyan-300 selection:text-slate-950">
+      <div className="app-ambient" aria-hidden="true" />
+      <TopConfigBar
+        phase={phase}
+        isCloudReady={isFbReady}
+        roomCode={roomCode}
+        playerId={playerId}
+      />
 
-      {/* Main App Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4">
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-3 py-4 sm:px-4">
         {roomSyncError && (
           <div
             role="alert"
@@ -86,11 +97,9 @@ export default function App() {
             playerId={playerId}
             roomData={roomData}
             onBothLocked={() => {
-              if (playerId === 'player1') {
-                void updateRoomStatus(roomCode, 'ANALYZING').catch((error) => {
-                  setRoomSyncError(error instanceof Error ? error.message : 'Unable to advance the room.');
-                });
-              }
+              void advanceRoomStatus(roomCode, 'DRAWING', 'ANALYZING').catch((error) => {
+                setRoomSyncError(error instanceof Error ? error.message : 'Unable to advance the room.');
+              });
             }}
           />
         )}
@@ -98,7 +107,6 @@ export default function App() {
         {phase === 'ANALYZING' && roomCode && playerId && (
           <Phase2Phase3FighterGen
             roomCode={roomCode}
-            playerId={playerId}
             geminiApiKey=""
             roomData={roomData}
           />
@@ -109,20 +117,12 @@ export default function App() {
             roomData={roomData}
             geminiApiKey=""
             onFightStart={async () => {
-              if (playerId === 'player1') {
-                try {
-                  await initFightState(
-                    roomCode,
-                    roomData.player1?.fighterData?.stats?.hp || 100,
-                    roomData.player2?.fighterData?.stats?.hp || 100,
-                    roomData.player1?.fighterData?.element || 'cyber',
-                    roomData.player1?.fighterData?.musicMood || 'arcade'
-                  );
-                } catch (error) {
-                  const message = error instanceof Error ? error.message : 'Unable to initialize the battlefield.';
-                  setRoomSyncError(message);
-                  throw error;
-                }
+              try {
+                await initFightState(roomCode);
+              } catch (error) {
+                const message = error instanceof Error ? error.message : 'Unable to initialize the battlefield.';
+                setRoomSyncError(message);
+                throw error;
               }
             }}
           />
