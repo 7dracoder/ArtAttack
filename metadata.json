@@ -1,0 +1,6 @@
+{
+  "name": "Art Attack - AI Fighter Battleground",
+  "description": "2-Player online fighting game powered by Firebase real-time sync and Gemini AI for character analysis, sprite generation, announcer TTS, and fight music.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
