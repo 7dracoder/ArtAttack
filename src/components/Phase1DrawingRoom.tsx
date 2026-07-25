@@ -10,6 +10,7 @@ import {
   Palette,
 } from 'lucide-react';
 import { lockInDrawing } from '../lib/firebaseHelper';
+import { exportCompactImage } from '../lib/imageData';
 import { RoomData, PlayerId } from '../types';
 
 interface Phase1DrawingRoomProps {
@@ -48,6 +49,13 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
 
   const me = playerId === 'player1' ? roomData?.player1 : roomData?.player2;
   const opponent = playerId === 'player1' ? roomData?.player2 : roomData?.player1;
+
+  // Preserve a submitted drawing when a player reloads or reconnects mid-phase.
+  useEffect(() => {
+    if (me?.drawingLocked) {
+      setIsLocked(true);
+    }
+  }, [me?.drawingLocked]);
 
   // Initialize Canvas
   useEffect(() => {
@@ -130,9 +138,12 @@ export const Phase1DrawingRoom: React.FC<Phase1DrawingRoomProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
     setLocking(true);
-    const drawingDataUrl = canvas.toDataURL('image/png');
 
     try {
+      const drawingDataUrl = exportCompactImage(canvas, {
+        maxDimension: 500,
+        maxCharacters: 120_000,
+      });
       await lockInDrawing(roomCode, playerId, drawingDataUrl);
       setIsLocked(true);
     } catch (err) {

@@ -6,9 +6,11 @@ import {
   getDoc,
   updateDoc,
   onSnapshot,
+  runTransaction,
   Firestore,
 } from 'firebase/firestore';
 import { RoomData, PlayerId, FighterData, PlayerFightState } from '../types';
+import { buildPlayerStateSyncUpdates } from './fightState';
 import defaultFirebaseConfig from '../../firebase-applet-config.json';
 
 let firebaseApp: FirebaseApp | null = null;
@@ -267,33 +269,50 @@ export async function initFightState(
 export async function syncPlayerState(roomCode: string, playerId: PlayerId, state: PlayerFightState) {
   if (!db) return;
   const roomRef = doc(db, 'art_attack_rooms', roomCode.toUpperCase());
-  await updateDoc(roomRef, {
-    [`fightState.${playerId}`]: state,
-    updatedAt: Date.now(),
-  });
+
+  // HP is intentionally excluded. Damage updates are authoritative; including a
+  // client's stale HP here would immediately undo hits received from its opponent.
+  await updateDoc(roomRef, buildPlayerStateSyncUpdates(playerId, state));
 }
 
 // Sync Damage / Hit
 export async function applyDamageToPlayer(
   roomCode: string,
   targetPlayer: PlayerId,
-  newHp: number,
-  winner?: PlayerId
-) {
-  if (!db) return;
+  damage: number,
+  attacker: PlayerId
+): Promise<boolean> {
+  if (!db) return false;
   const roomRef = doc(db, 'art_attack_rooms', roomCode.toUpperCase());
 
-  const updates: any = {
-    [`fightState.${targetPlayer}.hp`]: Math.max(0, newHp),
-    updatedAt: Date.now(),
-  };
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(roomRef);
+    if (!snapshot.exists()) {
+      throw new Error(`Room "${roomCode}" no longer exists.`);
+    }
 
-  if (winner) {
-    updates['fightState.winner'] = winner;
-    updates['status'] = 'FINISHED';
-  }
+    const room = snapshot.data() as RoomData;
+    const fightState = room.fightState;
+    if (!fightState || fightState.winner) return false;
 
-  await updateDoc(roomRef, updates);
+    const currentHp = fightState[targetPlayer].hp;
+    if (currentHp <= 0) return false;
+
+    const newHp = Math.max(0, currentHp - Math.max(0, damage));
+    const knockout = newHp <= 0;
+    const updates: Record<string, unknown> = {
+      [`fightState.${targetPlayer}.hp`]: newHp,
+      updatedAt: Date.now(),
+    };
+
+    if (knockout) {
+      updates['fightState.winner'] = attacker;
+      updates.status = 'FINISHED';
+    }
+
+    transaction.update(roomRef, updates);
+    return knockout;
+  });
 }
 
 // Set Commentary

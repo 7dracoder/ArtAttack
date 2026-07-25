@@ -6,51 +6,50 @@ import { Phase2Phase3FighterGen } from './components/Phase2Phase3FighterGen';
 import { Phase4AnnouncerIntro } from './components/Phase4AnnouncerIntro';
 import { Phase5FightArena } from './components/Phase5FightArena';
 import { RoomData, PlayerId, GamePhase } from './types';
-import { isFirebaseReady, updateRoomStatus, initFightState } from './lib/firebaseHelper';
+import {
+  isFirebaseReady,
+  updateRoomStatus,
+  initFightState,
+  subscribeToRoom,
+} from './lib/firebaseHelper';
+import { getGamePhase } from './lib/gameFlow';
 
 export default function App() {
-  const [isFbReady, setIsFbReady] = useState(true);
+  const [isFbReady] = useState(() => isFirebaseReady());
 
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [playerId, setPlayerId] = useState<PlayerId | null>(null);
   const [roomData, setRoomData] = useState<RoomData | null>(null);
+  const [roomSyncError, setRoomSyncError] = useState<string | null>(null);
   const [phase, setPhase] = useState<GamePhase>('LOBBY');
 
-  // Check Firebase readiness on startup
+  // Keep one live room listener for the entire match. Phase components mount and
+  // unmount as the game advances, so none of them should own this subscription.
   useEffect(() => {
-    setIsFbReady(isFirebaseReady());
-  }, []);
+    if (!roomCode || !isFbReady) return;
+
+    setRoomSyncError(null);
+    return subscribeToRoom(
+      roomCode,
+      (data) => {
+        setRoomData(data);
+        setRoomSyncError(null);
+      },
+      (error) => setRoomSyncError(error.message)
+    );
+  }, [roomCode, isFbReady]);
 
   // Sync phase with room status from Firebase
   useEffect(() => {
     if (!roomData) return;
-    switch (roomData.status) {
-      case 'WAITING':
-        setPhase('LOBBY');
-        break;
-      case 'DRAWING':
-        setPhase('DRAWING');
-        break;
-      case 'ANALYZING':
-      case 'SPRITE_GEN':
-        setPhase('ANALYZING');
-        break;
-      case 'INTRO':
-        setPhase('INTRO');
-        break;
-      case 'FIGHT':
-      case 'FINISHED':
-        setPhase('FIGHT');
-        break;
-      default:
-        break;
-    }
+    setPhase(getGamePhase(roomData.status));
   }, [roomData?.status]);
 
   const handleLeaveRoom = () => {
     setRoomCode(null);
     setPlayerId(null);
     setRoomData(null);
+    setRoomSyncError(null);
     setPhase('LOBBY');
   };
 
@@ -61,6 +60,15 @@ export default function App() {
 
       {/* Main App Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4">
+        {roomSyncError && (
+          <div
+            role="alert"
+            className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300"
+          >
+            Room connection error: {roomSyncError}
+          </div>
+        )}
+
         {phase === 'LOBBY' && (
           <Phase0Lobby
             roomCode={roomCode}
@@ -68,9 +76,7 @@ export default function App() {
             playerId={playerId}
             setPlayerId={setPlayerId}
             roomData={roomData}
-            setRoomData={setRoomData}
             isFirebaseConnected={isFbReady}
-            onAdvanceToDrawing={() => setPhase('DRAWING')}
           />
         )}
 
@@ -81,7 +87,9 @@ export default function App() {
             roomData={roomData}
             onBothLocked={() => {
               if (playerId === 'player1') {
-                updateRoomStatus(roomCode, 'ANALYZING');
+                void updateRoomStatus(roomCode, 'ANALYZING').catch((error) => {
+                  setRoomSyncError(error instanceof Error ? error.message : 'Unable to advance the room.');
+                });
               }
             }}
           />
@@ -93,23 +101,28 @@ export default function App() {
             playerId={playerId}
             geminiApiKey=""
             roomData={roomData}
-            onComplete={() => setPhase('INTRO')}
           />
         )}
 
-        {phase === 'INTRO' && (
+        {phase === 'INTRO' && roomCode && playerId && roomData && (
           <Phase4AnnouncerIntro
             roomData={roomData}
             geminiApiKey=""
             onFightStart={async () => {
               if (playerId === 'player1') {
-                await initFightState(
-                  roomCode,
-                  roomData.player1?.fighterData?.stats?.hp || 100,
-                  roomData.player2?.fighterData?.stats?.hp || 100,
-                  roomData.player1?.fighterData?.element || 'cyber',
-                  roomData.player1?.fighterData?.musicMood || 'arcade'
-                );
+                try {
+                  await initFightState(
+                    roomCode,
+                    roomData.player1?.fighterData?.stats?.hp || 100,
+                    roomData.player2?.fighterData?.stats?.hp || 100,
+                    roomData.player1?.fighterData?.element || 'cyber',
+                    roomData.player1?.fighterData?.musicMood || 'arcade'
+                  );
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : 'Unable to initialize the battlefield.';
+                  setRoomSyncError(message);
+                  throw error;
+                }
               }
             }}
           />

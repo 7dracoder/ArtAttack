@@ -1,20 +1,14 @@
 import React, { useRef, useEffect, useState } from 'react';
 import {
-  Swords,
   Shield,
-  Heart,
   Volume2,
   VolumeX,
   RotateCcw,
   LogOut,
-  Sparkles,
   Trophy,
-  Zap,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  ShieldAlert,
-  Loader2,
 } from 'lucide-react';
 import {
   syncPlayerState,
@@ -84,37 +78,48 @@ export const Phase5FightArena: React.FC<Phase5FightArenaProps> = ({
   const isHost = playerId === 'player1';
   const myFighter = isHost ? p1Fighter : p2Fighter;
   const oppFighter = isHost ? p2Fighter : p1Fighter;
+  const initialMyState = roomData?.fightState?.[playerId];
+  const opponentId: PlayerId = isHost ? 'player2' : 'player1';
+  const initialOpponentState = roomData?.fightState?.[opponentId];
 
   // Local physics state
-  const myStateRef = useRef<PlayerFightState>({
-    x: isHost ? 150 : 650,
-    y: 320,
-    vx: 0,
-    vy: 0,
-    hp: myFighter?.stats.hp || 100,
-    facingLeft: !isHost,
-    isGrounded: true,
-    isAttacking: false,
-    isBlocking: false,
-    currentAction: null,
-    cooldowns: {},
-    updatedAt: Date.now(),
-  });
+  const myStateRef = useRef<PlayerFightState>(
+    initialMyState
+      ? { ...initialMyState }
+      : {
+          x: isHost ? 150 : 650,
+          y: 320,
+          vx: 0,
+          vy: 0,
+          hp: myFighter?.stats.hp || 100,
+          facingLeft: !isHost,
+          isGrounded: true,
+          isAttacking: false,
+          isBlocking: false,
+          currentAction: null,
+          cooldowns: {},
+          updatedAt: Date.now(),
+        }
+  );
 
-  const oppStateRef = useRef<PlayerFightState>({
-    x: isHost ? 650 : 150,
-    y: 320,
-    vx: 0,
-    vy: 0,
-    hp: oppFighter?.stats.hp || 100,
-    facingLeft: isHost,
-    isGrounded: true,
-    isAttacking: false,
-    isBlocking: false,
-    currentAction: null,
-    cooldowns: {},
-    updatedAt: Date.now(),
-  });
+  const oppStateRef = useRef<PlayerFightState>(
+    initialOpponentState
+      ? { ...initialOpponentState }
+      : {
+          x: isHost ? 650 : 150,
+          y: 320,
+          vx: 0,
+          vy: 0,
+          hp: oppFighter?.stats.hp || 100,
+          facingLeft: isHost,
+          isGrounded: true,
+          isAttacking: false,
+          isBlocking: false,
+          currentAction: null,
+          cooldowns: {},
+          updatedAt: Date.now(),
+        }
+  );
 
   // Loaded Sprite Images
   const myImgRef = useRef<HTMLImageElement | null>(null);
@@ -126,8 +131,11 @@ export const Phase5FightArena: React.FC<Phase5FightArenaProps> = ({
 
   // Input Keys State
   const keysRef = useRef<Record<string, boolean>>({});
+  const syncInFlightRef = useRef(false);
 
   const winner = roomData?.fightState?.winner;
+  const player1State = isHost ? myStateRef.current : oppStateRef.current;
+  const player2State = isHost ? oppStateRef.current : myStateRef.current;
 
   // Preload Sprites
   useEffect(() => {
@@ -158,11 +166,17 @@ export const Phase5FightArena: React.FC<Phase5FightArenaProps> = ({
     };
   }, [p1Fighter?.element, soundEnabled]);
 
-  // Sync Opponent position lerp from Firebase
+  // Apply authoritative fight snapshots. Local movement stays responsive, while
+  // HP always comes from Firestore so received damage cannot be overwritten.
   useEffect(() => {
     if (!roomData?.fightState) return;
+    const myRemoteState = roomData.fightState[playerId];
     const oppKey = isHost ? 'player2' : 'player1';
     const remoteState = roomData.fightState[oppKey];
+
+    if (myRemoteState) {
+      myStateRef.current.hp = myRemoteState.hp;
+    }
 
     if (remoteState) {
       // Lerp opponent position for smooth anti-jitter rendering
@@ -279,11 +293,12 @@ export const Phase5FightArena: React.FC<Phase5FightArenaProps> = ({
         if (soundEnabled) playHitSfx(1.5);
       }
 
-      const newHp = Math.max(0, oppPos.hp - Math.max(2, finalDmg));
-      const isKo = newHp <= 0;
-
-      applyDamageToPlayer(roomCode, oppKey, newHp, isKo ? playerId : undefined);
-      if (isKo && soundEnabled) playKoSfx();
+      const dealtDamage = Math.max(2, finalDmg);
+      void applyDamageToPlayer(roomCode, oppKey, dealtDamage, playerId)
+        .then((isKo) => {
+          if (isKo && soundEnabled) playKoSfx();
+        })
+        .catch((error) => console.warn('Unable to apply melee damage:', error));
     }
   };
 
@@ -322,7 +337,7 @@ export const Phase5FightArena: React.FC<Phase5FightArenaProps> = ({
         }
 
         // Block
-        myStateRef.current.isBlocking = keys['s'] || keys['arrowdown'];
+        myStateRef.current.isBlocking = Boolean(keys['s'] || keys['arrowdown']);
 
         // Gravity
         myStateRef.current.y += myStateRef.current.vy;
@@ -339,11 +354,17 @@ export const Phase5FightArena: React.FC<Phase5FightArenaProps> = ({
         myStateRef.current.x = Math.max(40, Math.min(760, myStateRef.current.x));
       }
 
-      // Sync local state to Firebase every 40ms (~25 ticks/sec)
-      if (now - lastTick > 40) {
+      // Firestore is not a 60 FPS transport. Keep writes bounded, avoid overlap,
+      // and stop immediately after a winner so rematch cleanup cannot be raced.
+      if (!winner && !syncInFlightRef.current && now - lastTick > 125) {
         lastTick = now;
         myStateRef.current.updatedAt = now;
-        syncPlayerState(roomCode, playerId, myStateRef.current);
+        syncInFlightRef.current = true;
+        void syncPlayerState(roomCode, playerId, myStateRef.current)
+          .catch((error) => console.warn('Unable to sync player state:', error))
+          .finally(() => {
+            syncInFlightRef.current = false;
+          });
       }
 
       // Update Projectiles
@@ -358,10 +379,11 @@ export const Phase5FightArena: React.FC<Phase5FightArenaProps> = ({
             const oppKey: PlayerId = isHost ? 'player2' : 'player1';
             let dmg = p.damage;
             if (oppPos.isBlocking) dmg *= 0.3;
-            const newHp = Math.max(0, oppPos.hp - dmg);
-            const isKo = newHp <= 0;
-            applyDamageToPlayer(roomCode, oppKey, newHp, isKo ? playerId : undefined);
-            if (isKo && soundEnabled) playKoSfx();
+            void applyDamageToPlayer(roomCode, oppKey, dmg, playerId)
+              .then((isKo) => {
+                if (isKo && soundEnabled) playKoSfx();
+              })
+              .catch((error) => console.warn('Unable to apply projectile damage:', error));
           }
           projectilesRef.current.splice(idx, 1);
         } else if (p.x < 0 || p.x > 800) {
@@ -549,13 +571,18 @@ export const Phase5FightArena: React.FC<Phase5FightArenaProps> = ({
             <div className="flex justify-between items-center text-xs font-black text-cyan-300">
               <span className="uppercase">{p1Fighter?.characterName || 'Player 1'}</span>
               <span>
-                {myStateRef.current.hp} / {p1Fighter?.stats.maxHp || 100} HP
+                {player1State.hp} / {p1Fighter?.stats.maxHp || p1Fighter?.stats.hp || 100} HP
               </span>
             </div>
             <div className="w-full bg-slate-950 h-3 rounded-full border border-slate-800 overflow-hidden">
               <div
                 className="bg-gradient-to-r from-cyan-500 to-blue-500 h-full transition-all duration-200"
-                style={{ width: `${Math.max(0, (myStateRef.current.hp / (p1Fighter?.stats.maxHp || 100)) * 100)}%` }}
+                style={{
+                  width: `${Math.max(
+                    0,
+                    (player1State.hp / (p1Fighter?.stats.maxHp || p1Fighter?.stats.hp || 100)) * 100
+                  )}%`,
+                }}
               />
             </div>
           </div>
@@ -564,14 +591,19 @@ export const Phase5FightArena: React.FC<Phase5FightArenaProps> = ({
           <div className="space-y-1 text-right">
             <div className="flex justify-between items-center text-xs font-black text-rose-300">
               <span>
-                {oppStateRef.current.hp} / {p2Fighter?.stats.maxHp || 100} HP
+                {player2State.hp} / {p2Fighter?.stats.maxHp || p2Fighter?.stats.hp || 100} HP
               </span>
               <span className="uppercase">{p2Fighter?.characterName || 'Player 2'}</span>
             </div>
             <div className="w-full bg-slate-950 h-3 rounded-full border border-slate-800 overflow-hidden">
               <div
                 className="bg-gradient-to-r from-rose-500 to-amber-500 h-full transition-all duration-200 ml-auto"
-                style={{ width: `${Math.max(0, (oppStateRef.current.hp / (p2Fighter?.stats.maxHp || 100)) * 100)}%` }}
+                style={{
+                  width: `${Math.max(
+                    0,
+                    (player2State.hp / (p2Fighter?.stats.maxHp || p2Fighter?.stats.hp || 100)) * 100
+                  )}%`,
+                }}
               />
             </div>
           </div>

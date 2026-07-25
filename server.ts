@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type, Modality } from '@google/genai';
+import { parseImageDataUrl } from './src/lib/dataUrl';
 
 async function startServer() {
   const app = express();
@@ -35,8 +36,7 @@ async function startServer() {
 
       const ai = getAI(customApiKey);
 
-      // Clean base64 string
-      const base64Data = drawing.replace(/^data:image\/\w+;base64,/, '');
+      const imageData = parseImageDataUrl(drawing);
 
       const response = await ai.models.generateContent({
         model: 'gemini-3.6-flash',
@@ -44,8 +44,8 @@ async function startServer() {
           parts: [
             {
               inlineData: {
-                mimeType: 'image/png',
-                data: base64Data,
+                mimeType: imageData.mimeType,
+                data: imageData.data,
               },
             },
             {
@@ -123,7 +123,7 @@ async function startServer() {
       }
 
       const ai = getAI(customApiKey);
-      const base64Data = drawing.replace(/^data:image\/\w+;base64,/, '');
+      const imageData = parseImageDataUrl(drawing);
 
       const promptText = `Redraw this hand-drawn sketch into a polished, high-resolution 2D fighting game character sprite for "${characterName || 'Fighter'}" (${element || 'Elemental'}). Dynamic fighting stance, vibrant arcade game artwork, bold clean outlines, full body visible, isolated on a clean solid pure white background. Preserve the original color scheme, silhouette, and core visual features.`;
 
@@ -133,8 +133,8 @@ async function startServer() {
           parts: [
             {
               inlineData: {
-                data: base64Data,
-                mimeType: 'image/png',
+                data: imageData.data,
+                mimeType: imageData.mimeType,
               },
             },
             {

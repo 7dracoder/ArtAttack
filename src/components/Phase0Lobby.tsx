@@ -13,7 +13,7 @@ import {
   Sparkles,
   ArrowRight,
 } from 'lucide-react';
-import { createRoom, joinRoom, updateRoomStatus, subscribeToRoom } from '../lib/firebaseHelper';
+import { createRoom, joinRoom, updateRoomStatus } from '../lib/firebaseHelper';
 import { RoomData, PlayerId } from '../types';
 
 interface Phase0LobbyProps {
@@ -22,9 +22,7 @@ interface Phase0LobbyProps {
   playerId: PlayerId | null;
   setPlayerId: (id: PlayerId) => void;
   roomData: RoomData | null;
-  setRoomData: (data: RoomData) => void;
   isFirebaseConnected: boolean;
-  onAdvanceToDrawing: () => void;
 }
 
 export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
@@ -33,9 +31,7 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
   playerId,
   setPlayerId,
   roomData,
-  setRoomData,
   isFirebaseConnected,
-  onAdvanceToDrawing,
 }) => {
   const [joinInput, setJoinInput] = useState('');
   const [copied, setCopied] = useState(false);
@@ -63,24 +59,6 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
         .catch((err) => console.error('QR code error:', err));
     }
   }, [roomCode]);
-
-  // Subscribe to room updates
-  useEffect(() => {
-    if (roomCode && isFirebaseConnected) {
-      const unsubscribe = subscribeToRoom(
-        roomCode,
-        (data) => {
-          setRoomData(data);
-          // If status changes to DRAWING by host, advance player 2 automatically
-          if (data.status === 'DRAWING') {
-            onAdvanceToDrawing();
-          }
-        },
-        (err) => setError(err.message)
-      );
-      return () => unsubscribe();
-    }
-  }, [roomCode, isFirebaseConnected]);
 
   const handleCreateRoom = async () => {
     if (!isFirebaseConnected) {
@@ -137,7 +115,6 @@ export const Phase0Lobby: React.FC<Phase0LobbyProps> = ({
     if (!roomCode) return;
     try {
       await updateRoomStatus(roomCode, 'DRAWING');
-      onAdvanceToDrawing();
     } catch (e: any) {
       setError(e.message);
     }

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   Sparkles,
-  Zap,
   Shield,
   Heart,
   Gauge,
@@ -13,6 +12,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { updateFighterData, updateRoomStatus } from '../lib/firebaseHelper';
+import { compactImageDataUrl } from '../lib/imageData';
 import { RoomData, PlayerId, FighterData } from '../types';
 
 interface Phase2Phase3FighterGenProps {
@@ -20,7 +20,6 @@ interface Phase2Phase3FighterGenProps {
   playerId: PlayerId;
   geminiApiKey: string;
   roomData: RoomData | null;
-  onComplete: () => void;
 }
 
 export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
@@ -28,20 +27,32 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
   playerId,
   geminiApiKey,
   roomData,
-  onComplete,
 }) => {
   const [p1Loading, setP1Loading] = useState(false);
   const [p2Loading, setP2Loading] = useState(false);
   const [p1Stage, setP1Stage] = useState<'Analyzing Drawing...' | 'Rendering 2D Sprite...' | 'Ready!'>('Analyzing Drawing...');
   const [p2Stage, setP2Stage] = useState<'Analyzing Drawing...' | 'Rendering 2D Sprite...' | 'Ready!'>('Analyzing Drawing...');
   const [error, setError] = useState<string | null>(null);
+  const [retryVersion, setRetryVersion] = useState(0);
 
   const p1Data = roomData?.player1?.fighterData;
   const p2Data = roomData?.player2?.fighterData;
 
+  const advanceToIntro = async () => {
+    if (playerId !== 'player1') return;
+    try {
+      setError(null);
+      await updateRoomStatus(roomCode, 'INTRO');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to open the battle intro.';
+      setError(message);
+    }
+  };
+
   // Process fighter drawings using Gemini Vision + Image Gen APIs
   useEffect(() => {
     let active = true;
+    const requestController = new AbortController();
 
     async function processPlayerFighter(targetPlayer: PlayerId) {
       const pObj = targetPlayer === 'player1' ? roomData?.player1 : roomData?.player2;
@@ -52,12 +63,14 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
 
       setLoading(true);
       setStage('Analyzing Drawing...');
+      setError(null);
 
       try {
         // Step 1: Multimodal Vision Analysis (Structured Output)
         const analyzeRes = await fetch('/api/gemini/analyze-fighter', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: requestController.signal,
           body: JSON.stringify({
             drawing: pObj.drawingUrl,
             customApiKey: geminiApiKey,
@@ -76,6 +89,7 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
         const spriteRes = await fetch('/api/gemini/generate-sprite', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: requestController.signal,
           body: JSON.stringify({
             drawing: pObj.drawingUrl,
             characterName: data.characterName,
@@ -85,11 +99,24 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
         });
 
         const spriteJson = await spriteRes.json();
-        const spriteUrl = spriteJson.spriteUrl || spriteJson.fallbackUrl || pObj.drawingUrl;
+        const rawSpriteUrl = spriteJson.spriteUrl || spriteJson.fallbackUrl || pObj.drawingUrl;
+        const spriteUrl = await compactImageDataUrl(rawSpriteUrl, {
+          maxDimension: 512,
+          maxCharacters: 180_000,
+        });
+        const hp = Number(data.stats?.hp) || 100;
 
         const completeFighterData: FighterData = {
           ...data,
-          drawingUrl: pObj.drawingUrl,
+          stats: {
+            ...data.stats,
+            hp,
+            maxHp: hp,
+          },
+          abilities: (data.abilities || []).map((ability: any, index: number) => ({
+            ...ability,
+            id: ability.id || `ability_${index}`,
+          })),
           spriteUrl,
         };
 
@@ -98,6 +125,7 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
           await updateFighterData(roomCode, targetPlayer, completeFighterData);
         }
       } catch (err: any) {
+        if (err?.name === 'AbortError') return;
         console.error(`Error processing ${targetPlayer}:`, err);
         if (active) setError(err.message || 'Gemini AI processing error');
       } finally {
@@ -105,23 +133,38 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
       }
     }
 
-    // Player 1 handles P1, Player 2 handles P2 (or host processes both)
-    if (playerId === 'player1' && roomData?.player1?.drawingUrl && !p1Data) {
-      processPlayerFighter('player1');
-    }
-    if (playerId === 'player2' && roomData?.player2?.drawingUrl && !p2Data) {
-      processPlayerFighter('player2');
-    }
-  }, [roomData?.player1?.drawingUrl, roomData?.player2?.drawingUrl]);
+    // Deferring one task prevents React Strict Mode's development-only effect
+    // replay from launching duplicate, billable generation requests.
+    const startTimer = window.setTimeout(() => {
+      if (playerId === 'player1' && roomData?.player1?.drawingUrl && !p1Data) {
+        void processPlayerFighter('player1');
+      }
+      if (playerId === 'player2' && roomData?.player2?.drawingUrl && !p2Data) {
+        void processPlayerFighter('player2');
+      }
+    }, 0);
+
+    return () => {
+      active = false;
+      window.clearTimeout(startTimer);
+      requestController.abort();
+    };
+  }, [
+    playerId,
+    roomCode,
+    geminiApiKey,
+    roomData?.player1?.drawingUrl,
+    roomData?.player2?.drawingUrl,
+    retryVersion,
+  ]);
 
   // Advance to Intro when both fighters have full data
   useEffect(() => {
     if (p1Data && p2Data) {
       const timer = setTimeout(async () => {
         if (playerId === 'player1') {
-          await updateRoomStatus(roomCode, 'INTRO');
+          await advanceToIntro();
         }
-        onComplete();
       }, 3000);
       return () => clearTimeout(timer);
     }
@@ -144,9 +187,21 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
       </div>
 
       {error && (
-        <div className="w-full max-w-md bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl p-3 text-xs flex items-center space-x-2 mb-6">
-          <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-          <span>{error}</span>
+        <div className="w-full max-w-md bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl p-3 text-xs mb-6 space-y-3">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+            <span>{error}</span>
+          </div>
+          {!(p1Data && p2Data) &&
+            ((playerId === 'player1' && !p1Data) || (playerId === 'player2' && !p2Data)) && (
+              <button
+                type="button"
+                onClick={() => setRetryVersion((version) => version + 1)}
+                className="rounded-lg bg-rose-400 px-3 py-1.5 font-black uppercase text-slate-950 hover:bg-rose-300"
+              >
+                Retry Fighter Generation
+              </button>
+            )}
         </div>
       )}
 
@@ -172,11 +227,20 @@ export const Phase2Phase3FighterGen: React.FC<Phase2Phase3FighterGenProps> = ({
       </div>
 
       {p1Data && p2Data && (
-        <div className="mt-8 text-center space-y-2 animate-bounce">
+        <div className="mt-8 text-center space-y-3">
           <div className="inline-flex items-center space-x-2 px-4 py-2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-full font-bold text-sm shadow-lg">
             <CheckCircle2 className="w-5 h-5 text-emerald-400" />
             <span>Both Fighters Generated! Entering Battle Arena...</span>
           </div>
+          {error && playerId === 'player1' && (
+            <button
+              type="button"
+              onClick={() => void advanceToIntro()}
+              className="block mx-auto rounded-lg bg-amber-500 px-4 py-2 text-xs font-black uppercase text-slate-950 hover:bg-amber-400"
+            >
+              Retry Arena Transition
+            </button>
+          )}
         </div>
       )}
     </div>

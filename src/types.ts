@@ -39,7 +39,6 @@ export interface FighterData {
   entryDialogue: string;
   victoryDialogue: string;
   environmentName: string;
-  drawingUrl: string;
   spriteUrl: string;
 }
 

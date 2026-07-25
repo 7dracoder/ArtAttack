@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Volume2, Swords, Sparkles, Shield, Flame } from 'lucide-react';
-import { playGeminiAudio, playBeepSfx, playKoSfx } from '../lib/audioEngine';
-import { RoomData, PlayerId } from '../types';
+import { Volume2, Swords, AlertTriangle, Loader2 } from 'lucide-react';
+import { playGeminiAudio, playBeepSfx } from '../lib/audioEngine';
+import { RoomData } from '../types';
 
 interface Phase4AnnouncerIntroProps {
   roomData: RoomData | null;
   geminiApiKey: string;
-  onFightStart: () => void;
+  onFightStart: () => void | Promise<void>;
 }
 
 export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
@@ -17,12 +17,27 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
   const [announcementText, setAnnouncementText] = useState('PREPARE FOR BATTLE!');
   const [countdown, setCountdown] = useState<number | string>(3);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isStartingFight, setIsStartingFight] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const p1 = roomData?.player1?.fighterData;
   const p2 = roomData?.player2?.fighterData;
 
+  const startFight = async () => {
+    setIsStartingFight(true);
+    setStartError(null);
+    try {
+      await onFightStart();
+    } catch (error) {
+      setStartError(error instanceof Error ? error.message : 'Unable to initialize the battlefield.');
+    } finally {
+      setIsStartingFight(false);
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
+    const speechController = new AbortController();
 
     async function runAnnouncerSequence() {
       if (!p1 || !p2) return;
@@ -31,7 +46,7 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
         // Step 1: Announce Player 1
         const line1 = `Introducing ${p1.characterName}, master of ${p1.element}!`;
         setAnnouncementText(line1);
-        await speakText(line1);
+        void speakText(line1, speechController.signal);
 
         if (!mounted) return;
         await new Promise((r) => setTimeout(r, 1200));
@@ -39,7 +54,7 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
         // Step 2: Announce Player 2
         const line2 = `Facing off against ${p2.characterName}, master of ${p2.element}!`;
         setAnnouncementText(line2);
-        await speakText(line2);
+        void speakText(line2, speechController.signal);
 
         if (!mounted) return;
         await new Promise((r) => setTimeout(r, 1200));
@@ -66,29 +81,34 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
         setAnnouncementText('FIGHT!');
 
         // Speak FIGHT callout
-        speakText('FIGHT!');
+        void speakText('FIGHT!', speechController.signal);
 
         await new Promise((r) => setTimeout(r, 800));
-        if (mounted) onFightStart();
       } catch (err) {
         console.error('Announcer sequence error:', err);
-        if (mounted) onFightStart();
       }
+
+      if (mounted) await startFight();
     }
 
-    runAnnouncerSequence();
+    const sequenceTimer = window.setTimeout(() => {
+      void runAnnouncerSequence();
+    }, 0);
 
     return () => {
       mounted = false;
+      window.clearTimeout(sequenceTimer);
+      speechController.abort();
     };
   }, []);
 
-  const speakText = async (text: string) => {
+  const speakText = async (text: string, signal?: AbortSignal) => {
     setIsSpeaking(true);
     try {
       const res = await fetch('/api/gemini/generate-announcer-tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal,
         body: JSON.stringify({
           text,
           voice: 'Fenrir',
@@ -100,6 +120,7 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
         await playGeminiAudio(data.audioBase64, data.sampleRate || 24000);
       }
     } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       console.warn('TTS Speech fallback:', e);
     } finally {
       setIsSpeaking(false);
@@ -170,6 +191,24 @@ export const Phase4AnnouncerIntro: React.FC<Phase4AnnouncerIntroProps> = ({
             {countdown}
           </div>
         </div>
+
+        {startError && (
+          <div className="relative z-10 mx-auto max-w-md space-y-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200">
+            <div className="flex items-center justify-center gap-2 text-sm">
+              <AlertTriangle className="h-4 w-4" />
+              <span>{startError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void startFight()}
+              disabled={isStartingFight}
+              className="mx-auto flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-xs font-black uppercase text-slate-950 hover:bg-amber-400 disabled:opacity-60"
+            >
+              {isStartingFight && <Loader2 className="h-4 w-4 animate-spin" />}
+              Retry Battlefield
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
