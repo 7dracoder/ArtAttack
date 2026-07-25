@@ -6,7 +6,7 @@ import { Phase2Phase3FighterGen } from './components/Phase2Phase3FighterGen';
 import { Phase4AnnouncerIntro } from './components/Phase4AnnouncerIntro';
 import { Phase5FightArena } from './components/Phase5FightArena';
 import { RoomData, PlayerId, GamePhase } from './types';
-import { isFirebaseReady } from './lib/firebaseHelper';
+import { isFirebaseReady, updateRoomStatus, initFightState } from './lib/firebaseHelper';
 
 export default function App() {
   const [isFbReady, setIsFbReady] = useState(true);
@@ -79,7 +79,11 @@ export default function App() {
             roomCode={roomCode}
             playerId={playerId}
             roomData={roomData}
-            onBothLocked={() => setPhase('ANALYZING')}
+            onBothLocked={() => {
+              if (playerId === 'player1') {
+                updateRoomStatus(roomCode, 'ANALYZING');
+              }
+            }}
           />
         )}
 
@@ -97,7 +101,17 @@ export default function App() {
           <Phase4AnnouncerIntro
             roomData={roomData}
             geminiApiKey=""
-            onFightStart={() => setPhase('FIGHT')}
+            onFightStart={async () => {
+              if (playerId === 'player1') {
+                await initFightState(
+                  roomCode,
+                  roomData.player1?.fighterData?.stats?.hp || 100,
+                  roomData.player2?.fighterData?.stats?.hp || 100,
+                  roomData.player1?.fighterData?.element || 'cyber',
+                  roomData.player1?.fighterData?.musicMood || 'arcade'
+                );
+              }
+            }}
           />
         )}
 
